@@ -6,7 +6,7 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 
-//#define DEBUG
+#define DEBUG 1
 #ifdef DEBUG
 #define DEBUG_PRINTLN(x)  Serial.println(x)
 #define DEBUG_PRINT(x)  Serial.print(x)
@@ -16,7 +16,7 @@
 #endif
 
 #define MAX_UNSIGNED_INT     65535
-#define MSG_LENGTH 31   //0x42 + 31 bytes equal to PMS5003 serial message packet lenght
+#define MSG_LENGTH 31   //0x42 + 31 bytes equal to PMS5003 serial message packet length
 #define HTTP_TIMEOUT 20000 //maximum http response wait period, sensor disconects if no response
 #define MIN_WARM_TIME 30000 //warming-up period requred for sensor to enable fan and prepare air chamber
 unsigned char buf[MSG_LENGTH];
@@ -28,10 +28,10 @@ unsigned int pmRAW25 = 0;
 
 unsigned long timeout = 0;
 
+// config
+#include "secrets.h"
 const char* host = "api.thingspeak.com";
-const char* CLOUD_APPLICATION_ENDPOINT = "update?api_key=XXXXXXXXXXXXX=";
-const char* ssid     = "Free_WiFi";
-const char* password = "***********";
+const char* CLOUD_APPLICATION_ENDPOINT = "update?";
 const int   SLEEP_TIME = 5 * 60 * 1000;
 
 // PMS5003 Message Structure
@@ -211,7 +211,7 @@ void setupWIFI() {
      would try to act as both a client and an access-point and could cause
      network-issues with your other WiFi-devices on your WiFi-network. */
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
+  WiFi.begin(wifi_ssid, wifi_password);
   DEBUG_PRINT("connecting to WIFI");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -241,10 +241,6 @@ void sendDataToCloud() {
   
   DEBUG_PRINTLN("sendDataToCloud start");
   
-  "&field2=" + String(pm2_5Value) +
-               "&field3=" + String(pm10Value) +
-               "&field7=" + String(pmRAW25);
-  
   // Use WiFiClient class to create TCP connections
   WiFiClient client;
   if (!client.connect("api.thingspeak.com", 80)) {
@@ -253,17 +249,20 @@ void sendDataToCloud() {
   }
 
   //create URI for request
-  String url = CLOUD_APPLICATION_ENDPOINT + String(pm01Value) +
+  String url = String(CLOUD_APPLICATION_ENDPOINT) +
+    	       "&api_key=" + thingspeak_write_api_key +
+               "&field1=" + String(pm01Value) +
                "&field2=" + String(pm2_5Value) +
                "&field3=" + String(pm10Value) +
                "&field7=" + String(pmRAW25);
 
+  // logs api key if you care
   DEBUG_PRINTLN("Requesting GET: " + url);
   // This will send the request to the server
   client.print(String("GET /") + url + " HTTP/1.1\r\n" +
                "Host: " + host + "\r\n" +
                "Accept: */*\r\n" +
-               "User-Agent: Mozilla/4.0 (compatible; esp8266 Lua; Windows NT 5.1)\r\n" +
+               "User-Agent: Mozilla/4.0 (compatible; esp8266 Lua; Windows NT 5.1)\r\n" + // Why this complex UA?
                "Connection: close\r\n" +
                "\r\n");
   client.flush();
@@ -292,6 +291,10 @@ void sendDataToCloud() {
 
 void setup() {
   Serial.begin(9600);   //use serial0
+ while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+ while(1) {  Serial.println("HELLO"); }
 #ifdef DEBUG
   Serial.println(" Init started: DEBUG MODE");
 #else
