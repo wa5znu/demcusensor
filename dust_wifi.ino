@@ -15,6 +15,8 @@
 #define DEBUG_PRINT(x)
 #endif
 
+#define POWER_OFF_SENSOR (1)
+
 #define MAX_UNSIGNED_INT     65535
 #define MSG_LENGTH 31   //0x42 + 31 bytes equal to PMS5003 serial message packet length
 #define HTTP_TIMEOUT 20000 //maximum http response wait period, sensor disconects if no response
@@ -25,6 +27,7 @@ unsigned int pm01Value = 0;   //define PM1.0 value of the air detector module
 unsigned int pm2_5Value = 0;  //define pm2.5 value of the air detector module
 unsigned int pm10Value = 0;   //define pm10 value of the air detector module
 unsigned int pmRAW25 = 0;
+unsigned int aqiValue = 0;    // AQI value calculated
 
 unsigned long timeout = 0;
 
@@ -32,7 +35,7 @@ unsigned long timeout = 0;
 #include "secrets.h"
 const char* host = "api.thingspeak.com";
 const char* CLOUD_APPLICATION_ENDPOINT = "update?";
-const int   SLEEP_TIME = 5 * 60 * 1000;
+const int   SLEEP_TIME = 1 * 60 * 1000;
 
 // PMS5003 Message Structure
 struct PMSMessage {
@@ -125,7 +128,7 @@ boolean readSensorData(){
 }
 
 
-void printInfo(){
+void printInfo() {
   //debug printing
 #ifdef DEBUG
   DEBUG_PRINT("pm1tsi=");
@@ -196,14 +199,14 @@ void printInfo(){
 
 void powerOnSensor() {
   digitalWrite(D0, HIGH);
+  DEBUG_PRINT("sensor warm-up: ");
+  delay(MIN_WARM_TIME);
 }
 
 void powerOffSensor() {
-  WiFi.disconnect();
   digitalWrite(D0, LOW);
+  // DEBUG_PRINTLN("going to sleep zzz...");
   //ESP.deepSleep(SLEEP_TIME * 1000000); //deep sleep in microseconds, unfortunately doesn't work properly
-  DEBUG_PRINTLN("going to sleep zzz...");
-  delay(SLEEP_TIME);
 }
 
 void setupWIFI() {
@@ -250,11 +253,12 @@ void sendDataToCloud() {
 
   //create URI for request
   String url = String(CLOUD_APPLICATION_ENDPOINT) +
-    	       "&api_key=" + thingspeak_write_api_key +
-               "&field1=" + String(pm01Value) +
-               "&field2=" + String(pm2_5Value) +
-               "&field3=" + String(pm10Value) +
-               "&field7=" + String(pmRAW25);
+    "&api_key=" + thingspeak_write_api_key +
+    "&field1=" + String(pm01Value) +
+    "&field2=" + String(pm2_5Value) +
+    "&field3=" + String(pm10Value) +
+    "&field4=" + String(aqiValue) +
+    "&field7=" + String(pmRAW25);
 
   // logs api key if you care
   DEBUG_PRINTLN("Requesting GET: " + url);
@@ -291,10 +295,6 @@ void sendDataToCloud() {
 
 void setup() {
   Serial.begin(9600);   //use serial0
- while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
- while(1) {  Serial.println("HELLO"); }
 #ifdef DEBUG
   Serial.println(" Init started: DEBUG MODE");
 #else
@@ -302,6 +302,9 @@ void setup() {
 #endif
   Serial.setTimeout(1500);//set the Timeout to 1500ms, longer than the data transmission time of the sensor
   pinMode(D0, OUTPUT);
+  powerOnSensor();
+  setupWIFI();
+
   DEBUG_PRINTLN("Initialization finished");
 }
 
@@ -309,14 +312,12 @@ void loop() {
   DEBUG_PRINTLN("loop start");
   timeout = millis();
 
-  powerOnSensor();
-  setupWIFI();
+  if (WiFi.status() != WL_CONNECTED) {
+    setupWIFI();
+  }
 
-  timeout = MIN_WARM_TIME - (millis() - timeout);
-  if (timeout > 0 && timeout < MIN_WARM_TIME) {
-    DEBUG_PRINT("sensor warm-up: ");
-    DEBUG_PRINTLN(timeout);
-    delay(timeout);
+  if (POWER_OFF_SENSOR) {
+    powerOnSensor();
   }
 
 //Max & Min values are used to filter noise data
@@ -392,7 +393,7 @@ void loop() {
         printInfo();
         delay(500);
         count++;
-    }else{
+    } else {
       delay(1000);//data read failed
     }
   }
@@ -428,8 +429,58 @@ void loop() {
     //get mid value
     pmRAW25 = pmRAW25 / (count - 1);
     
+    // Calculate AQI
+    aqiValue = calculateAQI_25(pm2_5Value);
+    DEBUG_PRINT("pm2_5Value="); DEBUG_PRINT(pm2_5Value); DEBUG_PRINT(" aqiValue="); DEBUG_PRINTLN(aqiValue);
+
     sendDataToCloud();
   }
 
-  powerOffSensor();
+  if (POWER_OFF_SENSOR) {
+    powerOffSensor();
+  } else {
+    DEBUG_PRINTLN("Skipping powerOffSensor");
+  }
+  DEBUG_PRINTLN("Sleeping");
+  delay(SLEEP_TIME);
 }
+
+// USA AQI Standard
+// AQI formula: https://en.wikipedia.org/wiki/Air_Quality_Index#United_States
+int toAQI(int I_high, int I_low, int C_high, int C_low, int C) {
+  float f_I_high = I_high;
+  float f_I_low = I_low;
+  float f_C_high = C_high;
+  float f_C_low = C_low;
+  float f_C = C;
+  int aqiResult = (int)(round(I_high - I_low) * (C - C_low) / (C_high - C_low) + I_low);
+  return aqiResult;
+}
+
+// https://arduinosensor.tumblr.com/post/157881702335/formula-to-calculate-caqi-index
+int calculateAQI_25(int density_25)  {
+  int dx10 = density_25 * 10;
+  
+  if (dx10 <= 0) {
+    return  0;
+  } else if (dx10 <= 120) {
+    return  toAQI(50, 0, 120, 0, dx10);
+  } else if (dx10 <= 354) {
+    return  toAQI(100, 51, 354, 121, dx10);
+  } else if (dx10 <= 554) {
+    return  toAQI(150, 101, 554, 355, dx10);
+  } else if (dx10 <= 1504) {
+    return  toAQI(200, 151, 1504, 555, dx10);
+  } else if (dx10 <= 2504) {
+    return  toAQI(300, 201, 2504, 1505, dx10);
+  } else if (dx10 <= 3504) {
+    return  toAQI(400, 301, 3504, 2505, dx10);
+  } else if (dx10 <= 5004) {
+    return  toAQI(500, 401, 5004, 3505, dx10);
+  } else if (dx10 <= 10000) {
+    return toAQI(1000, 501, 10000, 5005, dx10);
+  } else {
+    return 1001;
+  }
+}
+
