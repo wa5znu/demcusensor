@@ -20,7 +20,9 @@ WA5ZNU updates, as running:
   wifi reliability, or might not.  it's working, though.
 - powerOffSensor: move delay out to loop,
   to reduce embedded delays, which are harder to account for.
-
+- move secrets (API key and Wifi) out to secrets.h
+  you should copy secrets.h.example to secrets.h and edit
+  .gitignore protects secrets.h from commit
 
 # demcusensor
 NodeMCU based PM2.5 monitoring application for PMS5003 dust sensor.
