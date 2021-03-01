@@ -341,10 +341,14 @@ void loop() {
   
   for (int i = 0; i < 35 && count < 8; i++) {
     if(readSensorData()){
-        if (pmsMessage.pm25atm == 0 || pmsMessage.pm1atm == pmsMessage.pm25atm || pmsMessage.pm25atm == pmsMessage.pm10atm || pmsMessage.raw25um == 0) {
-          //it is very rarely happened that different particles have same value, better to read again
+      if (pmsMessage.pm25atm == 0 &&
+	  pmsMessage.pm1atm == 0 &&
+	  pmsMessage.pm10atm == 0 &&
+	  pmsMessage.raw25um == 0) {
+          // only skip on all zeros
           DEBUG_PRINT("skip loop:");
           DEBUG_PRINTLN(i);
+	  printInfo();
           delay(1000);
           continue;
         }
