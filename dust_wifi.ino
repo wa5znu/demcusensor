@@ -9,12 +9,11 @@
 // config
 #include "secrets.h"
 
-#ifdef USE_MQTT
+#if USE_MQTT
 #include <PubSubClient.h>
 #endif
 
-#define DEBUG 1
-#ifdef DEBUG
+#if DEBUG
 #define DEBUG_PRINTLN(x)  Serial.println(x)
 #define DEBUG_PRINT(x)  Serial.print(x)
 #else
@@ -137,7 +136,7 @@ boolean readSensorData() {
 
 void printInfo() {
   //debug printing
-#ifdef DEBUG
+#if DEBUG
   DEBUG_PRINT("pm1tsi=");
   DEBUG_PRINT(pmsMessage.pm1tsi);
   DEBUG_PRINTLN();
@@ -245,7 +244,7 @@ void setupWIFI() {
   DEBUG_PRINTLN(WiFi.localIP());
 }
 
-#ifdef USE_MQTT
+#if USE_MQTT
 void getESPID(char *id, int n) {
    uint32_t chipid=ESP.getChipId();
    snprintf(id, n,"%s%08X", CLIENT_NAME_PREFIX, chipid);
@@ -324,7 +323,7 @@ void publishMQTT() {
 }
 #endif
 
-#ifdef USE_HTTP_API
+#if USE_HTTP_API
 void sendDataToCloudAPI() {
   DEBUG_PRINT("emb pm2.5: ");
   DEBUG_PRINTLN(pm2_5Value);
@@ -384,13 +383,13 @@ void sendDataToCloudAPI() {
 }
 #endif
 
-#ifdef USE_MQTT
+#if USE_MQTT
 #endif
 
 
 void setup() {
   Serial.begin(9600);   //shared between reading module and writing DEBUG
-#ifdef DEBUG
+#if DEBUG
   Serial.println(" Init started: DEBUG MODE");
 #else
   Serial.println(" Init started: NO DEBUG MODE");
@@ -532,10 +531,10 @@ void loop() {
     aqiValue = calculateAQI_25(pm2_5Value);
     DEBUG_PRINT("pm2_5Value="); DEBUG_PRINT(pm2_5Value); DEBUG_PRINT(" aqiValue="); DEBUG_PRINTLN(aqiValue);
 
-#ifdef USE_HTTP_API
+#if USE_HTTP_API
     sendDataToCloudAPI();
 #endif
-#ifdef USE_MQTT
+#if USE_MQTT
     sendDataToCloudMQTT();
 #endif
   }
