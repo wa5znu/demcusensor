@@ -257,9 +257,9 @@ boolean connectWiFi(const char *host, int port) {
   if (! wifiClient.connect(host, port)) {
     DEBUG_PRINTLN("connection failed");
     closeWifi();
-    return -1;
+    return false;
   } else {
-    return 0;
+    return true;
   }
 }
 
@@ -278,13 +278,13 @@ boolean connectMQTT() {
 
   if (mqttClient.connect(esp_id)) {
     Serial.println("MQTT connected");
+    return true;
   } else {
     Serial.print("failed with state ");
     Serial.println(mqttClient.state());
     delay(2000);
-    return -1;
+    return false;
   }
-  return 0;
 }
 
 void sendDataToCloudMQTT() {
@@ -293,7 +293,7 @@ void sendDataToCloudMQTT() {
   DEBUG_PRINT("RAW pm2.5: ");
   DEBUG_PRINTLN(pmRAW25);
 
-  if (connectWiFi(MQTT_HOST, MQTT_PORT) == 0) {
+  if (connectWiFi(MQTT_HOST, MQTT_PORT)) {
     if (connectMQTT()) {
       publishMQTT();
     }
@@ -389,7 +389,7 @@ void sendDataToCloudAPI() {
 
 
 void setup() {
-  Serial.begin(9600);   //use serial0
+  Serial.begin(9600);   //shared between reading module and writing DEBUG
 #ifdef DEBUG
   Serial.println(" Init started: DEBUG MODE");
 #else
