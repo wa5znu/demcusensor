@@ -1,6 +1,6 @@
 # WA5ZNU fork of demcusensor
 
-WA5ZNU updates, as running:
+## WA5ZNU updates, as running:
 
 - fork from https://github.com/vlytsus/demcusensor
 - calculateAQI: Add new field aqiValue
@@ -21,9 +21,13 @@ WA5ZNU updates, as running:
 - powerOffSensor: move delay out to loop,
   to reduce embedded delays, which are harder to account for.
 - move secrets (API key and Wifi) out to secrets.h
-  you should copy secrets.h.example to secrets.h and edit
-  .gitignore protects secrets.h from commit
+  cp secrets.h.example to secrets.h
+  ed .secrets.h
+  echo "secrets.h" >> .gitignore 
 
+## WA5ZNU Work in progress:
+- adding MQTT support, as in this [https://www.instructables.com/A-Low-cost-IoT-Air-Quality-Monitor-Based-on-Raspbe/](Instructables) article.
+  
 # demcusensor
 NodeMCU based PM2.5 monitoring application for PMS5003 dust sensor.
 
