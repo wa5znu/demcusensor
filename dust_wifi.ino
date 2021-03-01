@@ -389,7 +389,7 @@ void sendDataToCloudAPI() {
 
 
 void setup() {
-  Serial.begin(115200);   //use serial0
+  Serial.begin(9600);   //use serial0
 #ifdef DEBUG
   Serial.println(" Init started: DEBUG MODE");
 #else
