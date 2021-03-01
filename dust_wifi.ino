@@ -248,7 +248,7 @@ void setupWIFI() {
 #ifdef USE_MQTT
 void getESPID(char *id, int n) {
    uint32_t chipid=ESP.getChipId();
-   snprintf(id, n,"%s-%08X", CLIENT_NAME_PREFIX, chipid);
+   snprintf(id, n,"%s%08X", CLIENT_NAME_PREFIX, chipid);
 }
 
 boolean connectWiFi(const char *host, int port) {
@@ -277,7 +277,7 @@ boolean connectMQTT() {
   DEBUG_PRINTLN(esp_id);
 
   if (mqttClient.connect(esp_id)) {
-    Serial.println("connected");
+    Serial.println("MQTT connected");
   } else {
     Serial.print("failed with state ");
     Serial.println(mqttClient.state());
@@ -389,7 +389,7 @@ void sendDataToCloudAPI() {
 
 
 void setup() {
-  Serial.begin(9600);   //use serial0
+  Serial.begin(115200);   //use serial0
 #ifdef DEBUG
   Serial.println(" Init started: DEBUG MODE");
 #else

@@ -26,7 +26,14 @@
   echo "secrets.h" >> .gitignore 
 
 ## WA5ZNU Work in progress:
-- adding MQTT support, as in this [https://www.instructables.com/A-Low-cost-IoT-Air-Quality-Monitor-Based-on-Raspbe/](Instructables) article.
+- adding MQTT support,
+- ifdef controlled MQTT or HTTP support, giving size of ESP8266.
+- Based on examples in these articles
+- https://www.instructables.com/A-Low-cost-IoT-Air-Quality-Monitor-Based-on-Raspbe/
+- https://randomnerdtutorials.com/esp32-mqtt-publish-bme280-arduino/
+- https://medium.com/@chardorn/set-up-a-nodemcu-to-communicate-with-thingspeak-using-mqtt-fbad7556a5bc
+- https://github.com/knolleary/pubsubclient/blob/v2.8/examples/mqtt_esp8266/mqtt_esp8266.ino
+- https://gist.github.com/kd8bxp/3af6508b72b2db83c2fe93228e2b6fa2
   
 # demcusensor
 NodeMCU based PM2.5 monitoring application for PMS5003 dust sensor.
