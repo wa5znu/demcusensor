@@ -6,6 +6,13 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 
+// config
+#include "secrets.h"
+
+#ifdef USE_MQTT
+#include <PubSubClient.h>
+#endif
+
 #define DEBUG 1
 #ifdef DEBUG
 #define DEBUG_PRINTLN(x)  Serial.println(x)
@@ -31,10 +38,6 @@ unsigned int aqiValue = 0;    // AQI value calculated
 
 unsigned long timeout = 0;
 
-// config
-#include "secrets.h"
-const char* host = "api.thingspeak.com";
-const char* CLOUD_APPLICATION_ENDPOINT = "update?";
 const int   SLEEP_TIME = 1 * 60 * 1000;
 
 // PMS5003 Message Structure
@@ -57,9 +60,12 @@ struct PMSMessage {
     unsigned int checkSum;
 };
 
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+
 PMSMessage pmsMessage;
 
-boolean readSensorData(){
+boolean readSensorData() {
   DEBUG_PRINTLN("readSensorData start");
   
   unsigned char ch;
@@ -123,8 +129,9 @@ boolean readSensorData(){
 
   DEBUG_PRINT("data ready:");
   DEBUG_PRINTLN(pmsMessage.receivedSum);
-  DEBUG_PRINTLN(pmsMessage.receivedSum == pmsMessage.checkSum);
-  return pmsMessage.receivedSum == pmsMessage.checkSum;
+  bool checksum_match = (pmsMessage.receivedSum == pmsMessage.checkSum);
+  DEBUG_PRINTLN(checksum_match ? "checksum match" : "checksum fail");
+  return checksum_match;
 }
 
 
@@ -201,12 +208,14 @@ void powerOnSensor() {
   digitalWrite(D0, HIGH);
   DEBUG_PRINT("sensor warm-up: ");
   delay(MIN_WARM_TIME);
+  DEBUG_PRINT("done");
 }
 
 void powerOffSensor() {
   digitalWrite(D0, LOW);
   // DEBUG_PRINTLN("going to sleep zzz...");
-  //ESP.deepSleep(SLEEP_TIME * 1000000); //deep sleep in microseconds, unfortunately doesn't work properly
+  //ESP.deepSleep(SLEEP_TIME * 1000000);
+  //deep sleep in microseconds, unfortunately doesn't work properly
 }
 
 void setupWIFI() {
@@ -214,7 +223,7 @@ void setupWIFI() {
      would try to act as both a client and an access-point and could cause
      network-issues with your other WiFi-devices on your WiFi-network. */
   WiFi.mode(WIFI_STA);
-  WiFi.begin(wifi_ssid, wifi_password);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   DEBUG_PRINT("connecting to WIFI");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -236,7 +245,87 @@ void setupWIFI() {
   DEBUG_PRINTLN(WiFi.localIP());
 }
 
-void sendDataToCloud() {
+#ifdef USE_MQTT
+void getESPID(char *id, int n) {
+   uint32_t chipid=ESP.getChipId();
+   snprintf(id, n,"%s-%08X", CLIENT_NAME_PREFIX, chipid);
+}
+
+boolean connectWiFi(const char *host, int port) {
+  DEBUG_PRINTLN("connectWifi");
+  // Use WiFiClient class to create TCP connections
+  if (! wifiClient.connect(host, port)) {
+    DEBUG_PRINTLN("connection failed");
+    closeWifi();
+    return -1;
+  } else {
+    return 0;
+  }
+}
+
+void closeWifi() {
+  DEBUG_PRINTLN("closeWifi");
+  wifiClient.stop();
+}
+
+  
+boolean connectMQTT() {
+  char esp_id[MAX_ID_LEN];
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+  getESPID(esp_id, MAX_ID_LEN);
+  DEBUG_PRINT("espid ");
+  DEBUG_PRINTLN(esp_id);
+
+  if (mqttClient.connect(esp_id)) {
+    Serial.println("connected");
+  } else {
+    Serial.print("failed with state ");
+    Serial.println(mqttClient.state());
+    delay(2000);
+    return -1;
+  }
+  return 0;
+}
+
+void sendDataToCloudMQTT() {
+  DEBUG_PRINT("emb pm2.5: ");
+  DEBUG_PRINTLN(pm2_5Value);
+  DEBUG_PRINT("RAW pm2.5: ");
+  DEBUG_PRINTLN(pmRAW25);
+
+  if (connectWiFi(MQTT_HOST, MQTT_PORT) == 0) {
+    if (connectMQTT()) {
+      publishMQTT();
+    }
+    closeWifi();
+  }
+}
+
+void publishMQTT() {
+  DEBUG_PRINTLN("publishMQTT");
+  String payload =
+    "&field1=" + String(pm01Value) +
+    "&field2=" + String(pm2_5Value) +
+    "&field3=" + String(pm10Value) +
+    "&field4=" + String(aqiValue) +
+    "&field7=" + String(pmRAW25);
+  String topic = String("channels/") +
+    String(MQTT_CHANNEL_ID) +
+    String("/publish/") +
+    String(THINGSPEAK_WRITE_API_KEY);
+  DEBUG_PRINTLN("mqttClient.loop");
+  mqttClient.loop();
+  DEBUG_PRINT("publish ");
+  DEBUG_PRINT(topic);
+  DEBUG_PRINT(" ");
+  DEBUG_PRINTLN(payload);
+  mqttClient.publish(topic.c_str(), payload.c_str());
+  DEBUG_PRINTLN("DONE");
+}
+#endif
+
+#ifdef USE_HTTP_API
+void sendDataToCloudAPI() {
   DEBUG_PRINT("emb pm2.5: ");
   DEBUG_PRINTLN(pm2_5Value);
   DEBUG_PRINT("RAW pm2.5: ");
@@ -246,14 +335,15 @@ void sendDataToCloud() {
   
   // Use WiFiClient class to create TCP connections
   WiFiClient client;
-  if (!client.connect("api.thingspeak.com", 80)) {
+  if (!client.connect(CLOUD_API_HOST, CLOUD_API_PORT)) {
     DEBUG_PRINTLN("connection failed");
+    client.stop();
     return;
   }
 
   //create URI for request
   String url = String(CLOUD_APPLICATION_ENDPOINT) +
-    "&api_key=" + thingspeak_write_api_key +
+    "&api_key=" + THINGSPEAK_WRITE_API_KEY +
     "&field1=" + String(pm01Value) +
     "&field2=" + String(pm2_5Value) +
     "&field3=" + String(pm10Value) +
@@ -264,7 +354,7 @@ void sendDataToCloud() {
   DEBUG_PRINTLN("Requesting GET: " + url);
   // This will send the request to the server
   client.print(String("GET /") + url + " HTTP/1.1\r\n" +
-               "Host: " + host + "\r\n" +
+               "Host: " + CLOUD_API_HOST + "\r\n" +
                "Accept: */*\r\n" +
                "User-Agent: Mozilla/4.0 (compatible; esp8266 Lua; Windows NT 5.1)\r\n" + // Why this complex UA?
                "Connection: close\r\n" +
@@ -292,6 +382,11 @@ void sendDataToCloud() {
   DEBUG_PRINTLN();
   DEBUG_PRINTLN("closing connection");
 }
+#endif
+
+#ifdef USE_MQTT
+#endif
+
 
 void setup() {
   Serial.begin(9600);   //use serial0
@@ -343,7 +438,7 @@ void loop() {
     if(readSensorData()){
         if (pmsMessage.pm25atm == 0 || pmsMessage.pm1atm == pmsMessage.pm25atm || pmsMessage.pm25atm == pmsMessage.pm10atm || pmsMessage.raw25um == 0) {
           //it is very rarely happened that different particles have same value, better to read again
-          DEBUG_PRINT("skip loop:");
+          DEBUG_PRINT("all zero - skip loop:");
           DEBUG_PRINTLN(i);
           delay(1000);
           continue;
@@ -433,7 +528,12 @@ void loop() {
     aqiValue = calculateAQI_25(pm2_5Value);
     DEBUG_PRINT("pm2_5Value="); DEBUG_PRINT(pm2_5Value); DEBUG_PRINT(" aqiValue="); DEBUG_PRINTLN(aqiValue);
 
-    sendDataToCloud();
+#ifdef USE_HTTP_API
+    sendDataToCloudAPI();
+#endif
+#ifdef USE_MQTT
+    sendDataToCloudMQTT();
+#endif
   }
 
   if (POWER_OFF_SENSOR) {
@@ -441,7 +541,8 @@ void loop() {
   } else {
     DEBUG_PRINTLN("Skipping powerOffSensor");
   }
-  DEBUG_PRINTLN("Sleeping");
+  DEBUG_PRINT("Sleeping ");
+  DEBUG_PRINTLN(SLEEP_TIME);
   delay(SLEEP_TIME);
 }
 
