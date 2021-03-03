@@ -23,13 +23,10 @@
 #define DEBUG_PUTC(c)
 #endif
 
-#define POWER_OFF_SENSOR (1)
-
 #define MAX_UNSIGNED_INT     65535
 #define MSG_LENGTH 31   //0x42 + 31 bytes equal to PMS5003 serial message packet length
-#define HTTP_TIMEOUT 20000 //maximum http response wait period, sensor disconects if no response
+#define WIFI_STA_DELAY 1000 // wifi warmup time after entering STA mode.
 #define MIN_WARM_TIME 30000 //warming-up period requred for sensor to enable fan and prepare air chamber
-unsigned char buf[MSG_LENGTH];
 
 unsigned int pm01Value = 0;   //define PM1.0 value of the air detector module
 unsigned int pm2_5Value = 0;  //define pm2.5 value of the air detector module
@@ -39,7 +36,17 @@ unsigned int aqiValue = 0;    // AQI value calculated
 
 unsigned long timeout = 0;
 
-const int   SLEEP_TIME = 30 * 1000;
+unsigned int previous_pm2_5Value = 0;  //previous pm2.5 value of the air detector module
+
+// too many issues
+const bool POWER_OFF_SENSOR = false;
+
+// If value are changing quickly:
+// then FAST_SLEEP_TIME
+// else SLOW_SLEEP_TIME
+bool VALUES_CHANGING_QUICKLY = false;
+const int FAST_SLEEP_TIME = 60 * 1000;
+const int SLOW_SLEEP_TIME = 5 * 60 * 1000;
 
 // PMS5003 Message Structure
 struct PMSMessage {
@@ -63,7 +70,6 @@ struct PMSMessage {
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
-
 PMSMessage pmsMessage;
 
 void debug_putc(char c) {
@@ -76,14 +82,17 @@ void debug_putc(char c) {
   }
 }
 
-
 void syncFrame() {
   DEBUG_PRINT("Syncing frame: ");
   char c = '\0';
+  int i = 0;
   while (c != 'M') {
     do {
       c = Serial.read();
       DEBUG_PUTC(c);
+      if ((i++ % 64) == 0) {
+        yield(); mqttClient.loop();
+      }
     } while (c != 'B');
     c = Serial.read();
     DEBUG_PUTC(c);
@@ -241,8 +250,8 @@ void powerOnSensor() {
 }
 
 void powerOffSensor() {
+  DEBUG_PRINTLN("powerOffSensor");
   digitalWrite(D0, LOW);
-  // DEBUG_PRINTLN("going to sleep zzz...");
   //ESP.deepSleep(SLEEP_TIME * 1000000);
   //deep sleep in microseconds, unfortunately doesn't work properly
 }
@@ -252,7 +261,7 @@ void setupWIFI() {
      would try to act as both a client and an access-point and could cause
      network-issues with your other WiFi-devices on your WiFi-network. */
   WiFi.mode(WIFI_STA);
-  delay(1000);
+  delay(WIFI_STA_DELAY);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   DEBUG_PRINT("connecting to WIFI");
   while (WiFi.status() != WL_CONNECTED) {
@@ -275,7 +284,6 @@ void setupWIFI() {
   DEBUG_PRINTLN(WiFi.localIP());
 }
 
-#if USE_MQTT
 void getESPID(char *id, int n) {
    uint32_t chipid=ESP.getChipId();
    snprintf(id, n,"%s%08X", CLIENT_NAME_PREFIX, chipid);
@@ -346,83 +354,13 @@ void publishMQTT() {
     String(MQTT_CHANNEL_ID) +
     String("/publish/") +
     String(THINGSPEAK_WRITE_API_KEY);
-  DEBUG_PRINTLN("mqttClient.loop");
-  mqttClient.loop();
   DEBUG_PRINT("publish ");
   DEBUG_PRINT(topic);
   DEBUG_PRINT(" ");
   DEBUG_PRINTLN(payload);
   mqttClient.publish(topic.c_str(), payload.c_str());
-  DEBUG_PRINTLN("DONE");
+  DEBUG_PRINTLN("publishMQTT done");
 }
-#endif
-
-#if USE_HTTP_API
-void sendDataToCloudAPI() {
-  DEBUG_PRINT("emb pm2.5: ");
-  DEBUG_PRINTLN(pm2_5Value);
-  DEBUG_PRINT("RAW pm2.5: ");
-  DEBUG_PRINTLN(pmRAW25);
-  
-  DEBUG_PRINTLN("sendDataToCloud start");
-  
-  // Use WiFiClient class to create TCP connections
-  WiFiClient client;
-  if (!client.connect(CLOUD_API_HOST, CLOUD_API_PORT)) {
-    DEBUG_PRINT("sendDataToCloud failed: ");
-    DEBUG_PRINT(CLOUD_API_PORT);
-    DEBUG_PRINT(" ");
-    DEBUG_PRINTLN(CLOUD_API_PORT)
-    client.stop();
-    return;
-  }
-
-  //create URI for request
-  String url = String(CLOUD_APPLICATION_ENDPOINT) +
-    "&api_key=" + THINGSPEAK_WRITE_API_KEY +
-    "&field1=" + String(pm01Value) +
-    "&field2=" + String(pm2_5Value) +
-    "&field3=" + String(pm10Value) +
-    "&field4=" + String(aqiValue) +
-    "&field7=" + String(pmRAW25);
-
-  // logs api key if you care
-  DEBUG_PRINTLN("Requesting GET: " + url);
-  // This will send the request to the server
-  client.print(String("GET /") + url + " HTTP/1.1\r\n" +
-               "Host: " + CLOUD_API_HOST + "\r\n" +
-               "Accept: */*\r\n" +
-               "User-Agent: Mozilla/4.0 (compatible; esp8266 Lua; Windows NT 5.1)\r\n" + // Why this complex UA?
-               "Connection: close\r\n" +
-               "\r\n");
-  client.flush();
-  delay(10);
-  DEBUG_PRINTLN("wait for response");
-  timeout = millis();
-  while (client.available() == 0) {
-    if (millis() - timeout > HTTP_TIMEOUT) {
-      DEBUG_PRINTLN(">>> Client Timeout !");
-      client.stop();
-      DEBUG_PRINTLN("closing connection by timeout");
-      return;
-    }
-  }
-
-  // Read all the lines of the reply from server and print them to Serial
-  while (client.available()) {
-    String line = client.readStringUntil('\r');
-    DEBUG_PRINT(line);
-  }
-
-  client.stop();
-  DEBUG_PRINTLN();
-  DEBUG_PRINTLN("closing connection");
-}
-#endif
-
-#if USE_MQTT
-#endif
-
 
 void setup() {
   Serial.begin(9600);   //shared between reading module and writing DEBUG
@@ -473,13 +411,14 @@ void loop() {
   for (int i = 0; i < 35 && count < 8; i++) {
     if (readSensorData()) {
       if (pmsMessage.pm25atm == 0 &&
-	  pmsMessage.pm1atm == 0 &&
-	  pmsMessage.pm10atm == 0 &&
-	  pmsMessage.raw25um == 0) {
+          pmsMessage.pm1atm == 0 &&
+          pmsMessage.pm10atm == 0 &&
+          pmsMessage.raw25um == 0) {
           // only skip on all zeros
           DEBUG_PRINT("all zero - skip loop:");
           DEBUG_PRINTLN(i);
-	  printInfo();
+          printInfo();
+          DEBUG_PRINTLN("mqttClient.loop"); mqttClient.loop();
           delay(1000);
           continue;
         }
@@ -526,10 +465,12 @@ void loop() {
         pmRAW25 += pmsMessage.raw25um;
         //***********************************
         printInfo();
+        DEBUG_PRINTLN("mqttClient.loop"); mqttClient.loop();
         delay(500);
         count++;
     } else {
-      delay(1000);//data read failed
+      DEBUG_PRINTLN("mqttClient.loop"); mqttClient.loop();
+      delay(1000);              //data read failed
     }
   }
 
@@ -568,22 +509,19 @@ void loop() {
     aqiValue = calculateAQI_25(pm2_5Value);
     DEBUG_PRINT("pm2_5Value="); DEBUG_PRINT(pm2_5Value); DEBUG_PRINT(" aqiValue="); DEBUG_PRINTLN(aqiValue);
 
-#if USE_HTTP_API
-    sendDataToCloudAPI();
-#endif
-#if USE_MQTT
     sendDataToCloudMQTT();
-#endif
   }
+
+  VALUES_CHANGING_QUICKLY = abs(pm2_5Value - previous_pm2_5Value) > 3;
+  previous_pm2_5Value = pm2_5Value;
 
   if (POWER_OFF_SENSOR) {
     powerOffSensor();
-  } else {
-    DEBUG_PRINTLN("Skipping powerOffSensor");
   }
+  DEBUG_PRINTLN("mqttClient.loop"); mqttClient.loop();
   DEBUG_PRINT("Sleeping ");
-  DEBUG_PRINTLN(SLEEP_TIME);
-  delay(SLEEP_TIME);
+  DEBUG_PRINTLN(VALUES_CHANGING_QUICKLY ? FAST_SLEEP_TIME : SLOW_SLEEP_TIME);
+  delay(VALUES_CHANGING_QUICKLY ? FAST_SLEEP_TIME : SLOW_SLEEP_TIME);
 }
 
 // USA AQI Standard
