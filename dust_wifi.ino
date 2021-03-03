@@ -255,9 +255,6 @@ void powerOffSensor() {
 }
 
 void setupWIFI() {
-  /* Explicitly set the ESP8266 to be a WiFi-client, otherwise, it by default,
-     would try to act as both a client and an access-point and could cause
-     network-issues with your other WiFi-devices on your WiFi-network. */
   WiFi.mode(WIFI_STA);
   delay(WIFI_STA_DELAY);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -266,11 +263,13 @@ void setupWIFI() {
     delay(500);
     DEBUG_PRINT(".");
 
-    if (millis() - timeout > MIN_WARM_TIME) {
-      //can't connect to WIFI for a long time
-      //disable sensor to save lazer
-      digitalWrite(D0, LOW);
-      timeout = millis(); //reset timer
+    if (POWER_OFF_SENSOR) {
+      if (millis() - timeout > MIN_WARM_TIME) {
+	//can't connect to WIFI for a long time
+	//disable sensor to save lazer
+	digitalWrite(D0, LOW);
+	timeout = millis(); //reset timer
+      }
     }
   }
   //enable sensor just in case if was disabled
@@ -361,7 +360,8 @@ void publishMQTT() {
 }
 
 void setup() {
-  Serial.begin(9600);   //shared between reading module and writing DEBUG
+  // Serial shared between reading module and writing DEBUG, so it must be 9600.
+  Serial.begin(9600);   
 #if DEBUG
   Serial.println(" Init started: DEBUG MODE");
 #else
