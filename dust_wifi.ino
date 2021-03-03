@@ -16,9 +16,11 @@
 #if DEBUG
 #define DEBUG_PRINTLN(x)  Serial.println(x)
 #define DEBUG_PRINT(x)  Serial.print(x)
+#define DEBUG_PUTC(c)  debug_putc(c)
 #else
 #define DEBUG_PRINTLN(x)
 #define DEBUG_PRINT(x)
+#define DEBUG_PUTC(c)
 #endif
 
 #define POWER_OFF_SENSOR (1)
@@ -64,6 +66,31 @@ PubSubClient mqttClient(wifiClient);
 
 PMSMessage pmsMessage;
 
+void debug_putc(char c) {
+  if (c >= ' ' && c <= '~') {
+    DEBUG_PRINT(c);
+  } else {
+    DEBUG_PRINT("<");
+    DEBUG_PRINT((int)c);
+    DEBUG_PRINT(">");
+  }
+}
+
+
+void syncFrame() {
+  DEBUG_PRINT("Syncing frame: ");
+  char c = '\0';
+  while (c != 'M') {
+    do {
+      c = Serial.read();
+      DEBUG_PUTC(c);
+    } while (c != 'B');
+    c = Serial.read();
+    DEBUG_PUTC(c);
+  }
+  DEBUG_PRINTLN();
+}
+
 boolean readSensorData() {
   DEBUG_PRINTLN("readSensorData start");
   
@@ -72,64 +99,67 @@ boolean readSensorData() {
   unsigned int value = 0;
   pmsMessage.receivedSum = 0;
   
-  for(int count = 0; count < 32 && Serial.available(); count ++){    
+  // Look for 'BM' at beginning of first whole lessage
+  syncFrame();
+  pmsMessage.receivedSum += 'B' + 'M';
+
+  // Depends on Serial.available with timeout -- does that work?
+  for (int count = 2; count < 32 && Serial.available(); count++) {
     ch = Serial.read();
-    if ((count == 0 && ch != 0x42) || (count == 1 && ch != 0x4d)) {
-      pmsMessage.receivedSum = 0;
-      DEBUG_PRINTLN("message failed");
-      break;
-    }else if((count % 2) == 0){
+    if ((count % 2) == 0) {
       high = ch;
-    }else{
+    } else {
       value = 256 * high + ch;
     }
     
-    if (count == 5) { 
+    //calculate checksum for all bytes except last two
+    if (count < 30) {
+      pmsMessage.receivedSum += ch;
+    }
+
+    switch(count) {
+    case 5:
       pmsMessage.pm1tsi = value; //PM 1.0 [ug/m3] (TSI standard)
-    } else if (count == 7) {
-      pmsMessage.pm25tsi = value; //PM 2.5 [ug/m3] (TSI standard)
-    } else if (count == 9) {
-      pmsMessage.pm10tsi = value; //PM 10. [ug/m3] (TSI standard)
-    } else if (count == 11) {
-      pmsMessage.pm1atm = value; //PM 1.0 [ug/m3] (std. atmosphere)
-    } else if (count == 13) {
-      pmsMessage.pm25atm = value; //PM 2.5 [ug/m3] (std. atmosphere)
-    } else if (count == 15) {
-      pmsMessage.pm10atm = value; //PM 10. [ug/m3] (std. atmosphere)
-    } else if (count == 17) {
-      pmsMessage.raw03um = value; //num. particles with diameter > 0.3 um in 100 cm3 of air
-    } else if (count == 19) {
-      pmsMessage.raw05um = value; //num. particles with diameter > 0.5 um in 100 cm3 of air
-    } else if (count == 21) {
-      pmsMessage.raw10um = value; //num. particles with diameter > 1.0 um in 100 cm3 of air
-    } else if (count == 23) {
-      pmsMessage.raw25um = value; //num. particles with diameter > 2.5 um in 100 cm3 of air
-    } else if (count == 25) {
-      pmsMessage.raw50um = value; //num. particles with diameter > 5.0 um in 100 cm3 of air
-    } else if (count == 27) {
-      pmsMessage.raw100um = value; //num. particles with diameter > 10. um in 100 cm3 of air
-    } else if (count == 29) {
-      pmsMessage.version = 256 * high; //version & error code
-      pmsMessage.errorCode = ch;      
-    }
-            
-    if (count < 30){
-      pmsMessage.receivedSum += ch; //calculate checksum for all bytes except last two      
-    } else if (count == 31) {
-      pmsMessage.checkSum = value; // last two bytes contains checksum from device
+      break;
+    case 7: pmsMessage.pm25tsi = value; //PM 2.5 [ug/m3] (TSI standard)
+      break;
+    case 9: pmsMessage.pm10tsi = value; //PM 10. [ug/m3] (TSI standard)
+      break;
+    case 11: pmsMessage.pm1atm = value; //PM 1.0 [ug/m3] (std. atmosphere)
+      break;
+    case 13: pmsMessage.pm25atm = value; //PM 2.5 [ug/m3] (std. atmosphere)
+      break;
+    case 15: pmsMessage.pm10atm = value; //PM 10. [ug/m3] (std. atmosphere)
+      break;
+    case 17: pmsMessage.raw03um = value; //num. particles with diameter > 0.3 um in 100 cm3 of air
+      break;
+    case 19: pmsMessage.raw05um = value; //num. particles with diameter > 0.5 um in 100 cm3 of air
+      break;
+    case 21: pmsMessage.raw10um = value; //num. particles with diameter > 1.0 um in 100 cm3 of air
+      break;
+    case 23: pmsMessage.raw25um = value; //num. particles with diameter > 2.5 um in 100 cm3 of air
+      break;
+    case 25: pmsMessage.raw50um = value; //num. particles with diameter > 5.0 um in 100 cm3 of air
+      break;
+    case 27: pmsMessage.raw100um = value; //num. particles with diameter > 10. um in 100 cm3 of air
+      break;
+    case 29: pmsMessage.version = 256 * high; pmsMessage.errorCode = ch; //version & error code
+      break;
+    case 31: pmsMessage.checkSum = value; // last two bytes contains checksum from device
+      break;
     }
   }
 
-  //read data that is not usefull
-  while (Serial.available()){
-    Serial.read();
-    DEBUG_PRINT(".");
-  }
-
-  DEBUG_PRINT("data ready:");
-  DEBUG_PRINTLN(pmsMessage.receivedSum);
+  DEBUG_PRINT("data ready: receivedSum=");
+  DEBUG_PRINT(pmsMessage.receivedSum);
+  DEBUG_PRINT(" expectedSum=");
+  DEBUG_PRINT(pmsMessage.checkSum);
   bool checksum_match = (pmsMessage.receivedSum == pmsMessage.checkSum);
-  DEBUG_PRINTLN(checksum_match ? "checksum match" : "checksum fail");
+  DEBUG_PRINTLN(checksum_match ? " checksum match" : " checksum fail");
+  if (! checksum_match) {
+    DEBUG_PRINT("FAIL: ");
+    printInfo();
+  }
   return checksum_match;
 }
 
@@ -139,63 +169,63 @@ void printInfo() {
 #if DEBUG
   DEBUG_PRINT("pm1tsi=");
   DEBUG_PRINT(pmsMessage.pm1tsi);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("pm25tsi=");
   DEBUG_PRINT(pmsMessage.pm25tsi);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("pm10tsi=");
   DEBUG_PRINT(pmsMessage.pm10tsi);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("pm1atm=");
   DEBUG_PRINT(pmsMessage.pm1atm);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("pm25atm=");
   DEBUG_PRINT(pmsMessage.pm25atm);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("pm10atm=");
   DEBUG_PRINT(pmsMessage.pm10atm);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("raw03um=");
   DEBUG_PRINT(pmsMessage.raw03um);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("raw05um=");
   DEBUG_PRINT(pmsMessage.raw05um);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("raw10um=");
   DEBUG_PRINT(pmsMessage.raw10um);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("raw25um=");
   DEBUG_PRINT(pmsMessage.raw25um);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("raw50um=");
   DEBUG_PRINT(pmsMessage.raw50um);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("raw100um=");
   DEBUG_PRINT(pmsMessage.raw100um);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("version=");
   DEBUG_PRINT(pmsMessage.version);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("errorCode=");
   DEBUG_PRINT(pmsMessage.errorCode);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("receivedSum=");
   DEBUG_PRINT(pmsMessage.receivedSum);
-  DEBUG_PRINTLN();
+  DEBUG_PRINT(" ");
   
   DEBUG_PRINT("checkSum=");
   DEBUG_PRINT(pmsMessage.checkSum);
@@ -222,6 +252,7 @@ void setupWIFI() {
      would try to act as both a client and an access-point and could cause
      network-issues with your other WiFi-devices on your WiFi-network. */
   WiFi.mode(WIFI_STA);
+  delay(1000);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   DEBUG_PRINT("connecting to WIFI");
   while (WiFi.status() != WL_CONNECTED) {
@@ -253,20 +284,19 @@ void getESPID(char *id, int n) {
 boolean connectWiFi(const char *host, int port) {
   boolean ok = false;
   DEBUG_PRINT("connectWifi: ");
-  ok = wifiClient.connect(host, port);
-  if (! ok) {
-    DEBUG_PRINT("failed: ");
+  for (int i = 0; i<10 && ! ok; i++) {
+    ok = wifiClient.connect(host, port);
+    if (! ok) {
+      DEBUG_PRINT("failed: ");
+      wifiClient.stop();
+      delay(1000);
+    }
+    DEBUG_PRINT(host);
+    DEBUG_PRINT(" ");
+    DEBUG_PRINTLN(port);
   }
-  DEBUG_PRINT(host);
-  DEBUG_PRINT(" ");
-  DEBUG_PRINTLN(port);
   return ok;
 }
-
-// void closeWifi() {
-//   DEBUG_PRINTLN("closeWifi");
-//   wifiClient.stop();
-// }
   
 boolean connectMQTT() {
   char esp_id[MAX_ID_LEN];
@@ -401,7 +431,7 @@ void setup() {
 #else
   Serial.println(" Init started: NO DEBUG MODE");
 #endif
-  Serial.setTimeout(1500);//set the Timeout to 1500ms, longer than the data transmission time of the sensor
+  Serial.setTimeout(3000);//set the Timeout to 1500ms, longer than the data transmission time of the sensor
   pinMode(D0, OUTPUT);
   powerOnSensor();
   setupWIFI();
@@ -441,7 +471,7 @@ void loop() {
   int count = 0;
   
   for (int i = 0; i < 35 && count < 8; i++) {
-    if (readSensorData()){
+    if (readSensorData()) {
       if (pmsMessage.pm25atm == 0 &&
 	  pmsMessage.pm1atm == 0 &&
 	  pmsMessage.pm10atm == 0 &&
