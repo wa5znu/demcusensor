@@ -322,10 +322,12 @@ boolean connectMQTT() {
 }
 
 void sendDataToCloudMQTT() {
+#if 0
   DEBUG_PRINT("emb pm2.5: ");
   DEBUG_PRINTLN(pm2_5Value);
   DEBUG_PRINT("RAW pm2.5: ");
   DEBUG_PRINTLN(pmRAW25);
+#endif
 
   boolean ok = false;
 
