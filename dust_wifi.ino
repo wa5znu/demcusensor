@@ -80,7 +80,7 @@ void debug_putc(char c) {
   }
 }
 
-void syncFrame() {
+boolean syncFrame() {
   DEBUG_PRINT("Syncing frame: ");
   char c = '\0';
   int i = 0;
@@ -96,6 +96,7 @@ void syncFrame() {
     DEBUG_PUTC(c);
   }
   DEBUG_PRINTLN();
+  return true;
 }
 
 boolean readSensorData() {
@@ -107,7 +108,9 @@ boolean readSensorData() {
   pmsMessage.receivedSum = 0;
   
   // Look for 'BM' at beginning of first whole lessage
-  syncFrame();
+  if (! syncFrame()) {
+    return false;
+  }
   pmsMessage.receivedSum += 'B' + 'M';
 
   // Depends on Serial.available with timeout -- does that work?
