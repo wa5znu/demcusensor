@@ -254,19 +254,20 @@ boolean connectWiFi(const char *host, int port) {
   DEBUG_PRINTLN("connectWifi");
   // Use WiFiClient class to create TCP connections
   if (! wifiClient.connect(host, port)) {
-    DEBUG_PRINTLN("connection failed");
-    closeWifi();
+    DEBUG_PRINT("connectWifi failed: ");
+    DEBUG_PRINT(host);
+    DEBUG_PRINT(" ");
+    DEBUG_PRINTLN(port);
     return false;
   } else {
     return true;
   }
 }
 
-void closeWifi() {
-  DEBUG_PRINTLN("closeWifi");
-  wifiClient.stop();
-}
-
+// void closeWifi() {
+//   DEBUG_PRINTLN("closeWifi");
+//   wifiClient.stop();
+// }
   
 boolean connectMQTT() {
   char esp_id[MAX_ID_LEN];
@@ -292,11 +293,15 @@ void sendDataToCloudMQTT() {
   DEBUG_PRINT("RAW pm2.5: ");
   DEBUG_PRINTLN(pmRAW25);
 
+  boolean ok = false;
+
   if (connectWiFi(MQTT_HOST, MQTT_PORT)) {
-    if (connectMQTT()) {
-      publishMQTT();
-    }
-    closeWifi();
+    ok = true;
+  } else if (connectWiFi(MQTT_HOST_BACKUP, MQTT_PORT_BACKUP)) {
+    ok = true;
+  }
+  if (ok && connectMQTT()) {
+    publishMQTT();
   }
 }
 
@@ -335,7 +340,10 @@ void sendDataToCloudAPI() {
   // Use WiFiClient class to create TCP connections
   WiFiClient client;
   if (!client.connect(CLOUD_API_HOST, CLOUD_API_PORT)) {
-    DEBUG_PRINTLN("connection failed");
+    DEBUG_PRINT("sendDataToCloud failed: ");
+    DEBUG_PRINT(CLOUD_API_PORT);
+    DEBUG_PRINT(" ");
+    DEBUG_PRINTLN(CLOUD_API_PORT)
     client.stop();
     return;
   }
