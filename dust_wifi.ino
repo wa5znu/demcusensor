@@ -251,17 +251,16 @@ void getESPID(char *id, int n) {
 }
 
 boolean connectWiFi(const char *host, int port) {
-  DEBUG_PRINTLN("connectWifi");
-  // Use WiFiClient class to create TCP connections
-  if (! wifiClient.connect(host, port)) {
-    DEBUG_PRINT("connectWifi failed: ");
-    DEBUG_PRINT(host);
-    DEBUG_PRINT(" ");
-    DEBUG_PRINTLN(port);
-    return false;
-  } else {
-    return true;
+  boolean ok = false;
+  DEBUG_PRINT("connectWifi: ");
+  ok = wifiClient.connect(host, port);
+  if (! ok) {
+    DEBUG_PRINT("failed: ");
   }
+  DEBUG_PRINT(host);
+  DEBUG_PRINT(" ");
+  DEBUG_PRINTLN(port);
+  return ok;
 }
 
 // void closeWifi() {
