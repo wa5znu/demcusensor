@@ -337,7 +337,7 @@ void sendDataToCloudMQTT() {
 void publishMQTT() {
   DEBUG_PRINTLN("publishMQTT");
   String payload =
-    "&field1=" + String(pm01Value) +
+    "field1=" + String(pm01Value) +
     "&field2=" + String(pm2_5Value) +
     "&field3=" + String(pm10Value) +
     "&field4=" + String(aqiValue) +
