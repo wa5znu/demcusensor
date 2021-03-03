@@ -39,7 +39,7 @@ unsigned int aqiValue = 0;    // AQI value calculated
 
 unsigned long timeout = 0;
 
-const int   SLEEP_TIME = 1 * 60 * 1000;
+const int   SLEEP_TIME = 30 * 1000;
 
 // PMS5003 Message Structure
 struct PMSMessage {
