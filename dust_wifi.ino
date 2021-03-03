@@ -9,9 +9,7 @@
 // config
 #include "secrets.h"
 
-#if USE_MQTT
 #include <PubSubClient.h>
-#endif
 
 #if DEBUG
 #define DEBUG_PRINTLN(x)  Serial.println(x)
