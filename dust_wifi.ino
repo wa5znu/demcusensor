@@ -367,7 +367,8 @@ void setup() {
 #else
   Serial.println(" Init started: NO DEBUG MODE");
 #endif
-  Serial.setTimeout(3000);//set the Timeout to 1500ms, longer than the data transmission time of the sensor
+  //set the Timeout to 1500ms, longer than the data transmission time of the sensor
+  Serial.setTimeout(1500);
   pinMode(D0, OUTPUT);
   powerOnSensor();
   setupWIFI();
