@@ -258,7 +258,7 @@ void setupWIFI() {
   WiFi.mode(WIFI_STA);
   delay(WIFI_STA_DELAY);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  DEBUG_PRINT("connecting to WIFI");
+  DEBUG_PRINT("\nConnecting to WIFI");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     DEBUG_PRINT(".");
@@ -275,9 +275,7 @@ void setupWIFI() {
   //enable sensor just in case if was disabled
   digitalWrite(D0, HIGH);
 
-  DEBUG_PRINTLN("");
-  DEBUG_PRINTLN("WiFi connected");
-  DEBUG_PRINTLN("IP address: ");
+  DEBUG_PRINT("\nWiFi connected: IP=");
   DEBUG_PRINTLN(WiFi.localIP());
 }
 
@@ -286,9 +284,9 @@ void getESPID(char *id, int n) {
    snprintf(id, n,"%s%08X", CLIENT_NAME_PREFIX, chipid);
 }
 
-boolean connectWiFi(const char *host, int port) {
+boolean connectTCP(const char *host, int port) {
   boolean ok = false;
-  DEBUG_PRINT("connectWifi: ");
+  DEBUG_PRINT("connectTCP: ");
   for (int i = 0; i<10 && ! ok; i++) {
     ok = wifiClient.connect(host, port);
     if (! ok) {
@@ -307,14 +305,13 @@ boolean connectMQTT() {
   char esp_id[MAX_ID_LEN];
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   getESPID(esp_id, MAX_ID_LEN);
-  DEBUG_PRINT("espid ");
-  DEBUG_PRINTLN(esp_id);
 
+  DEBUG_PRINT(String("connectMQTT host=") + MQTT_HOST + ":" + String(MQTT_PORT) + " espid=" + esp_id + ": ");
   if (mqttClient.connect(esp_id)) {
-    Serial.println("MQTT connected");
+    Serial.println("connected");
     return true;
   } else {
-    Serial.print("failed with state ");
+    Serial.print("failed; state=");
     Serial.println(mqttClient.state());
     delay(2000);
     return false;
@@ -331,9 +328,9 @@ void sendDataToCloudMQTT() {
 
   boolean ok = false;
 
-  if (connectWiFi(MQTT_HOST, MQTT_PORT)) {
+  if (connectTCP(MQTT_HOST, MQTT_PORT)) {
     ok = true;
-  } else if (connectWiFi(MQTT_HOST_BACKUP, MQTT_PORT_BACKUP)) {
+  } else if (connectTCP(MQTT_HOST_BACKUP, MQTT_PORT_BACKUP)) {
     ok = true;
   }
   if (ok && connectMQTT()) {
@@ -342,7 +339,7 @@ void sendDataToCloudMQTT() {
 }
 
 void publishMQTT() {
-  DEBUG_PRINTLN("publishMQTT");
+  DEBUG_PRINT("publishMQTT: topic= ");
   String payload =
     "field1=" + String(pm01Value) +
     "&field2=" + String(pm2_5Value) +
@@ -353,12 +350,10 @@ void publishMQTT() {
     String(MQTT_CHANNEL_ID) +
     String("/publish/") +
     String(THINGSPEAK_WRITE_API_KEY);
-  DEBUG_PRINT("publish ");
   DEBUG_PRINT(topic);
-  DEBUG_PRINT(" ");
+  DEBUG_PRINT(" pauload=");
   DEBUG_PRINTLN(payload);
   mqttClient.publish(topic.c_str(), payload.c_str());
-  DEBUG_PRINTLN("publishMQTT done");
 }
 
 void setup() {
@@ -375,7 +370,7 @@ void setup() {
   powerOnSensor();
   setupWIFI();
 
-  DEBUG_PRINTLN("Initialization finished");
+  DEBUG_PRINTLN("setup done");
 }
 
 void loop() {
@@ -416,9 +411,8 @@ void loop() {
           pmsMessage.pm10atm == 0 &&
           pmsMessage.raw25um == 0) {
           // only skip on all zeros
-          DEBUG_PRINT("all zero - skip loop:");
+          DEBUG_PRINT("sensor data all zero - skip loop:");
           DEBUG_PRINTLN(i);
-          printInfo();
           DEBUG_PRINTLN("mqttClient.loop"); mqttClient.loop();
           delay(1000);
           continue;
