@@ -42,6 +42,9 @@ const bool POWER_OFF_SENSOR = false;
 // If value are changing quickly:
 // then FAST_SLEEP_TIME
 // else SLOW_SLEEP_TIME
+// Set MIN_VALUE_CHANGE to 0 to disable this feature.
+// #define MIN_VALUE_CHANGE (3)
+#define MIN_VALUE_CHANGE (0)
 bool VALUES_CHANGING_QUICKLY = false;
 const int FAST_SLEEP_TIME = 60 * 1000;
 const int SLOW_SLEEP_TIME = 5 * 60 * 1000;
@@ -333,8 +336,10 @@ void sendDataToCloudMQTT() {
 
   if (connectTCP(MQTT_HOST, MQTT_PORT)) {
     ok = true;
+#if FAILOVER_MQTT
   } else if (connectTCP(MQTT_HOST_BACKUP, MQTT_PORT_BACKUP)) {
     ok = true;
+#endif
   }
   if (ok && connectMQTT()) {
     publishMQTT();
@@ -510,7 +515,7 @@ void loop() {
     sendDataToCloudMQTT();
   }
 
-  VALUES_CHANGING_QUICKLY = abs(pm2_5Value - previous_pm2_5Value) > 3;
+  VALUES_CHANGING_QUICKLY = abs(pm2_5Value - previous_pm2_5Value) >= MIN_VALUE_CHANGE;
   previous_pm2_5Value = pm2_5Value;
 
   if (POWER_OFF_SENSOR) {
