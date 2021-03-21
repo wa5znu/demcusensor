@@ -336,10 +336,6 @@ void sendDataToCloudMQTT() {
 
   if (connectTCP(MQTT_HOST, MQTT_PORT)) {
     ok = true;
-#if FAILOVER_MQTT
-  } else if (connectTCP(MQTT_HOST_BACKUP, MQTT_PORT_BACKUP)) {
-    ok = true;
-#endif
   }
   if (ok && connectMQTT()) {
     publishMQTT();
