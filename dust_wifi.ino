@@ -26,28 +26,24 @@
 #define WIFI_STA_DELAY 1000 // wifi warmup time after entering STA mode.
 #define MIN_WARM_TIME 30000 //warming-up period requred for sensor to enable fan and prepare air chamber
 
-unsigned int pm01Value = 0;   //define PM1.0 value of the air detector module
-unsigned int pm2_5Value = 0;  //define pm2.5 value of the air detector module
-unsigned int pm10Value = 0;   //define pm10 value of the air detector module
-unsigned int pmRAW25 = 0;
-unsigned int aqiValue = 0;    // AQI value calculated
+unsigned int pm01 = 0;   //define PM1.0 value of the air detector module
+unsigned int pm2_5 = 0;  //define pm2.5 value of the air detector module
+unsigned int pm10 = 0;   //define pm10 value of the air detector module
+unsigned int pm2_5raw = 0;
+unsigned int aqi = 0;    // AQI value calculated
 
 unsigned long timeout = 0;
 
-unsigned int previous_pm2_5Value = 0;  //previous pm2.5 value of the air detector module
+unsigned long checksum_errors = 0;
+unsigned long tcp_connect_errors = 0;
+unsigned long mqtt_connect_errors = 0;
+unsigned long mqtt_publish_errors = 0;
+
+char esp_id[MAX_ID_LEN];
+const int SLEEP_TIME = 60 * 1000;
 
 // too many issues
 const bool POWER_OFF_SENSOR = false;
-
-// If value are changing quickly:
-// then FAST_SLEEP_TIME
-// else SLOW_SLEEP_TIME
-// Set MIN_VALUE_CHANGE to 0 to disable this feature.
-// #define MIN_VALUE_CHANGE (3)
-#define MIN_VALUE_CHANGE (0)
-bool VALUES_CHANGING_QUICKLY = false;
-const int FAST_SLEEP_TIME = 60 * 1000;
-const int SLOW_SLEEP_TIME = 5 * 60 * 1000;
 
 // PMS5003 Message Structure
 struct PMSMessage {
@@ -115,6 +111,7 @@ boolean readSensorData() {
     return false;
   }
   pmsMessage.receivedSum += 'B' + 'M';
+  delay(100);			// delay 100ms to wait for chars to show up
 
   // Depends on Serial.available with timeout -- does that work?
   for (int count = 2; count < 32 && Serial.available(); count++) {
@@ -170,6 +167,7 @@ boolean readSensorData() {
   bool checksum_match = (pmsMessage.receivedSum == pmsMessage.checkSum);
   DEBUG_PRINTLN(checksum_match ? " checksum match" : " checksum fail");
   if (! checksum_match) {
+    checksum_errors++;
     DEBUG_PRINT("FAIL: ");
     printInfo();
   }
@@ -283,6 +281,10 @@ void setupWIFI() {
 
   DEBUG_PRINT("\nWiFi connected: IP=");
   DEBUG_PRINTLN(WiFi.localIP());
+
+  getESPID(esp_id, MAX_ID_LEN);
+  DEBUG_PRINT("esp_id = ");
+  DEBUG_PRINTLN(esp_id);
 }
 
 void getESPID(char *id, int n) {
@@ -308,9 +310,7 @@ boolean connectTCP(const char *host, int port) {
 }
   
 boolean connectMQTT() {
-  char esp_id[MAX_ID_LEN];
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-  getESPID(esp_id, MAX_ID_LEN);
 
   DEBUG_PRINT(String("connectMQTT host=") + MQTT_HOST + ":" + String(MQTT_PORT) + " espid=" + esp_id + ": ");
   if (mqttClient.connect(esp_id)) {
@@ -319,45 +319,52 @@ boolean connectMQTT() {
   } else {
     Serial.print("failed; state=");
     Serial.println(mqttClient.state());
-    delay(2000);
+    mqtt_connect_errors++;
     return false;
   }
 }
 
-void sendDataToCloudMQTT() {
-#if 0
-  DEBUG_PRINT("emb pm2.5: ");
-  DEBUG_PRINTLN(pm2_5Value);
-  DEBUG_PRINT("RAW pm2.5: ");
-  DEBUG_PRINTLN(pmRAW25);
-#endif
-
-  boolean ok = false;
-
-  if (connectTCP(MQTT_HOST, MQTT_PORT)) {
-    ok = true;
+boolean connectAndPublishMQTT() {
+  if (! connectTCP(MQTT_HOST, MQTT_PORT)) {
+    tcp_connect_errors++;
+    return false;
   }
-  if (ok && connectMQTT()) {
-    publishMQTT();
+  if (! connectMQTT()) {
+    mqtt_connect_errors++;
+    return false;
   }
+  if (! publishMQTT()) {
+    mqtt_publish_errors++;
+    return false;
+  }
+  return true;
 }
 
-void publishMQTT() {
-  DEBUG_PRINT("publishMQTT: topic= ");
-  String payload =
-    "field1=" + String(pm01Value) +
-    "&field2=" + String(pm2_5Value) +
-    "&field3=" + String(pm10Value) +
-    "&field4=" + String(aqiValue) +
-    "&field7=" + String(pmRAW25);
-  String topic = String("channels/") +
-    String(MQTT_CHANNEL_ID) +
-    String("/publish/") +
-    String(THINGSPEAK_WRITE_API_KEY);
-  DEBUG_PRINT(topic);
-  DEBUG_PRINT(" pauload=");
-  DEBUG_PRINTLN(payload);
-  mqttClient.publish(topic.c_str(), payload.c_str());
+boolean publishMQTT() {
+  boolean ok = false;
+  {
+    DEBUG_PRINT("publishMQTT sensor: ");
+    char topic[MAX_TOPIC_LEN];
+    char payload[MAX_PAYLOAD_LEN];
+    snprintf(topic, MAX_TOPIC_LEN,"%s/%s%08X", MQTT_SENSOR_TOPIC_PREFIX, esp_id);
+    snprintf(payload, MAX_PAYLOAD_LEN, "pm01=%d;pm2_5=%d;pm10=%d;aqi=%d;pm2_5raw=%d",
+	     pm01, pm2_5, pm10, aqi, pm2_5raw);
+
+    DEBUG_PRINT("topic="); DEBUG_PRINT(topic); DEBUG_PRINT(" payload="); DEBUG_PRINTLN(payload);
+    ok = mqttClient.publish(topic, payload);
+  }
+
+  {
+    DEBUG_PRINT("publishMQTT telemetry: ");
+    char topic[MAX_TOPIC_LEN];
+    char payload[MAX_PAYLOAD_LEN];
+    snprintf(topic, MAX_TOPIC_LEN,"%s/%s%08X", MQTT_STATS_TOPIC_PREFIX, esp_id);
+    snprintf(payload, MAX_PAYLOAD_LEN, "checksum_errors=0;tcp_connect_errors=0;mqtt_connect_errors=0;mqtt_publish_errors=0",
+	     checksum_errors, tcp_connect_errors, mqtt_connect_errors, mqtt_publish_errors);
+    DEBUG_PRINT("topic="); DEBUG_PRINT(topic); DEBUG_PRINT(" payload="); DEBUG_PRINTLN(payload);
+    ok = mqttClient.publish(topic, payload);
+  }  
+  return ok;
 }
 
 void setup() {
@@ -390,22 +397,22 @@ void loop() {
   }
 
 //Max & Min values are used to filter noise data
-  unsigned int maxPm01Value =0;
-  unsigned int minPm01Value =0;
+  unsigned int maxPm01 =0;
+  unsigned int minPm01 =0;
     
-  unsigned int maxPm2_5Value =0;
-  unsigned int minPm2_5Value =0;
+  unsigned int maxPM2_5 =0;
+  unsigned int minPM2_5 =0;
     
-  unsigned int maxPm10Value =0;
-  unsigned int minPm10Value =0;
+  unsigned int maxPM10 =0;
+  unsigned int minPM10 =0;
   
   unsigned int maxRAW25 =0;
   unsigned int minRAW25 =0;
 
-  pm01Value = 0;   //define PM1.0 value of the air detector module
-  pm2_5Value = 0;  //define pm2.5 value of the air detector module
-  pm10Value = 0;   //define pm10 value of the air detector module
-  pmRAW25 = 0;   
+  pm01 = 0;   //define PM1.0 value of the air detector module
+  pm2_5 = 0;  //define pm2.5 value of the air detector module
+  pm10 = 0;   //define pm10 value of the air detector module
+  pm2_5raw = 0;   
   int count = 0;
   
   for (int i = 0; i < 35 && count < 8; i++) {
@@ -418,40 +425,39 @@ void loop() {
           DEBUG_PRINT("sensor data all zero - skip loop:");
           DEBUG_PRINTLN(i);
           DEBUG_PRINTLN("mqttClient.loop"); mqttClient.loop();
-          delay(1000);
           continue;
         }
 
         //***********************************
         //find max dust per sample
-        if (pmsMessage.pm1atm > maxPm01Value) {
-          maxPm01Value = pmsMessage.pm1atm;
+        if (pmsMessage.pm1atm > maxPm01) {
+          maxPm01 = pmsMessage.pm1atm;
         }
         //find min dust per sample
-        if (pmsMessage.pm1atm < minPm01Value) {
-          minPm01Value = pmsMessage.pm1atm;
+        if (pmsMessage.pm1atm < minPm01) {
+          minPm01 = pmsMessage.pm1atm;
         }
-        pm01Value += pmsMessage.pm1atm;
+        pm01 += pmsMessage.pm1atm;
         //***********************************
         //find max dust per sample
-        if (pmsMessage.pm25atm > maxPm2_5Value) {
-          maxPm2_5Value = pmsMessage.pm25atm;
+        if (pmsMessage.pm25atm > maxPM2_5) {
+          maxPM2_5 = pmsMessage.pm25atm;
         }
         //find min dust per sample
-        if (pmsMessage.pm25atm < minPm2_5Value) {
-          minPm2_5Value = pmsMessage.pm25atm;
+        if (pmsMessage.pm25atm < minPM2_5) {
+          minPM2_5 = pmsMessage.pm25atm;
         }
-        pm2_5Value += pmsMessage.pm25atm;
+        pm2_5 += pmsMessage.pm25atm;
         //***********************************
         //find max dust per sample
-        if (pmsMessage.pm10atm > maxPm10Value) {
-          maxPm10Value = pmsMessage.pm10atm;
+        if (pmsMessage.pm10atm > maxPM10) {
+          maxPM10 = pmsMessage.pm10atm;
         }
         //find min dust per sample
-        if (pmsMessage.pm10atm < minPm10Value) {
-          minPm10Value = pmsMessage.pm10atm;
+        if (pmsMessage.pm10atm < minPM10) {
+          minPM10 = pmsMessage.pm10atm;
         }
-        pm10Value += pmsMessage.pm10atm;
+        pm10 += pmsMessage.pm10atm;
         //***********************************        
         //findRAW  max dust per sample
         if (pmsMessage.pm10atm > maxRAW25) {
@@ -461,66 +467,60 @@ void loop() {
         if (pmsMessage.pm10atm > 0 && pmsMessage.pm10atm < minRAW25) {
           minRAW25 = pmsMessage.raw25um;
         }
-        pmRAW25 += pmsMessage.raw25um;
+        pm2_5raw += pmsMessage.raw25um;
         //***********************************
         printInfo();
         DEBUG_PRINTLN("mqttClient.loop"); mqttClient.loop();
-        delay(500);
         count++;
     } else {
       DEBUG_PRINTLN("mqttClient.loop"); mqttClient.loop();
-      delay(1000);              //data read failed
     }
   }
 
   if (count > 2) {
-    if (pm2_5Value == 0) {
-      pm01Value += minPm01Value;
-      pm2_5Value += minPm2_5Value;
-      pm10Value += minPm10Value;
-      pmRAW25 += minRAW25;
+    if (pm2_5 == 0) {
+      pm01 += minPm01;
+      pm2_5 += minPM2_5;
+      pm10 += minPM10;
+      pm2_5raw += minRAW25;
     }
 
     //remove max & min records from calculations
-    pm01Value -= maxPm01Value;
-    pm01Value -= minPm01Value;
+    pm01 -= maxPm01;
+    pm01 -= minPm01;
     //get mid value
-    pm01Value = pm01Value / (count - 1);
+    pm01 = pm01 / (count - 1);
 
     //remove max & min records from calculations
-    pm2_5Value -= maxPm2_5Value;
-    pm2_5Value -= minPm2_5Value;
+    pm2_5 -= maxPM2_5;
+    pm2_5 -= minPM2_5;
     //get mid value
-    pm2_5Value = pm2_5Value / (count - 1);
+    pm2_5 = pm2_5 / (count - 1);
 
     //remove max & min records from calculations
-    pm10Value -= maxPm10Value;
-    pm10Value -= minPm10Value;
-    pm10Value = pm10Value / (count - 1);
+    pm10 -= maxPM10;
+    pm10 -= minPM10;
+    pm10 = pm10 / (count - 1);
 
-    //removve max & min records from calculations
-    pmRAW25 -= maxRAW25;
-    pmRAW25 -= minRAW25;
+    //remove max & min records from calculations
+    pm2_5raw -= maxRAW25;
+    pm2_5raw -= minRAW25;
     //get mid value
-    pmRAW25 = pmRAW25 / (count - 1);
+    pm2_5raw = pm2_5raw / (count - 1);
     
     // Calculate AQI
-    aqiValue = calculateAQI_25(pm2_5Value);
-    DEBUG_PRINT("pm2_5Value="); DEBUG_PRINT(pm2_5Value); DEBUG_PRINT(" aqiValue="); DEBUG_PRINTLN(aqiValue);
+    aqi = calculateAQI_25(pm2_5);
 
-    sendDataToCloudMQTT();
+    connectAndPublishMQTT();
   }
-
-  VALUES_CHANGING_QUICKLY = abs(pm2_5Value - previous_pm2_5Value) >= MIN_VALUE_CHANGE;
-  previous_pm2_5Value = pm2_5Value;
 
   if (POWER_OFF_SENSOR) {
     powerOffSensor();
   }
   DEBUG_PRINTLN("mqttClient.loop"); mqttClient.loop();
   DEBUG_PRINT("Sleeping ");
-  DEBUG_PRINTLN(VALUES_CHANGING_QUICKLY ? FAST_SLEEP_TIME : SLOW_SLEEP_TIME);
-  delay(VALUES_CHANGING_QUICKLY ? FAST_SLEEP_TIME : SLOW_SLEEP_TIME);
+  DEBUG_PRINTLN(SLEEP_TIME);
+  delay(SLEEP_TIME);
 }
 
 // USA AQI Standard
