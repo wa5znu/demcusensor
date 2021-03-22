@@ -346,10 +346,9 @@ boolean publishMQTT() {
     DEBUG_PRINT("publishMQTT sensor: ");
     char topic[MAX_TOPIC_LEN];
     char payload[MAX_PAYLOAD_LEN];
-    snprintf(topic, MAX_TOPIC_LEN,"%s/%s%08X", MQTT_SENSOR_TOPIC_PREFIX, esp_id);
+    snprintf(topic, MAX_TOPIC_LEN,"%s/%s", MQTT_SENSOR_TOPIC_PREFIX, esp_id);
     snprintf(payload, MAX_PAYLOAD_LEN, "pm01=%d;pm2_5=%d;pm10=%d;aqi=%d;pm2_5raw=%d",
 	     pm01, pm2_5, pm10, aqi, pm2_5raw);
-
     DEBUG_PRINT("topic="); DEBUG_PRINT(topic); DEBUG_PRINT(" payload="); DEBUG_PRINTLN(payload);
     ok = mqttClient.publish(topic, payload);
   }
@@ -358,7 +357,7 @@ boolean publishMQTT() {
     DEBUG_PRINT("publishMQTT telemetry: ");
     char topic[MAX_TOPIC_LEN];
     char payload[MAX_PAYLOAD_LEN];
-    snprintf(topic, MAX_TOPIC_LEN,"%s/%s%08X", MQTT_STATS_TOPIC_PREFIX, esp_id);
+    snprintf(topic, MAX_TOPIC_LEN,"%s/%s", MQTT_STATS_TOPIC_PREFIX, esp_id);
     snprintf(payload, MAX_PAYLOAD_LEN, "checksum_errors=0;tcp_connect_errors=0;mqtt_connect_errors=0;mqtt_publish_errors=0",
 	     checksum_errors, tcp_connect_errors, mqtt_connect_errors, mqtt_publish_errors);
     DEBUG_PRINT("topic="); DEBUG_PRINT(topic); DEBUG_PRINT(" payload="); DEBUG_PRINTLN(payload);
